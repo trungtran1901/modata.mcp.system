@@ -3,11 +3,11 @@ mcp_servers/gateway.py
 MCP Gateway — gộp tất cả servers vào 1 endpoint SSE duy nhất.
 
 Tools prefix:
-  data_*       analytics_*       docs_*       tools_*       mail_*       admin_*
+  data_*        analytics_*       docs_*       tools_*
+  mail_*        admin_*           hrm_*        ← MỚI
 
-Chạy:
-  python -m mcp_servers.gateway
-URL: http://0.0.0.0:8001/sse
+Chạy: python -m mcp_servers.gateway
+URL : http://0.0.0.0:8001/sse
 """
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from mcp_servers.docs_server      import mcp as docs_mcp
 from mcp_servers.tools_server     import mcp as tools_mcp
 from mcp_servers.mail_server      import mcp as mail_mcp
 from mcp_servers.admin_server     import mcp as admin_mcp
+from mcp_servers.hrm_server       import mcp as hrm_mcp   # ← MỚI
 
 gateway = FastMCP("MODATA Gateway")
 
@@ -46,6 +47,7 @@ gateway.mount(docs_mcp,      prefix="docs")
 gateway.mount(tools_mcp,     prefix="tools")
 gateway.mount(mail_mcp,      prefix="mail")
 gateway.mount(admin_mcp,     prefix="admin")
+gateway.mount(hrm_mcp,       prefix="hrm")                # ← MỚI
 
 if __name__ == "__main__":
     from app.core.config import settings
