@@ -1,0 +1,27 @@
+# MODATA.MCP — MCP Gateway Project
+# Không cài model local. Embed gọi qua HTTP từ remote host.
+
+# MCP framework
+fastmcp>=2.0.0
+
+# Config
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+
+# MongoDB
+pymongo>=4.7.0
+
+# Redis (schema cache)
+redis>=5.0.0
+
+# PostgreSQL (session store)
+psycopg2-binary>=2.9.9
+
+# Vector DB (docs_server RAG)
+qdrant-client>=1.9.0
+
+# HTTP client (embed remote server)
+httpx>=0.27.0
+
+# ASGI runner (standalone mode mỗi server)
+uvicorn[standard]>=0.29.0

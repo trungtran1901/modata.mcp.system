@@ -1,0 +1,11 @@
+# docker-compose.dev.yml — Dev override (hot reload + volume mount)
+# Dùng: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  mcp-gateway:
+    command: python run.py
+    volumes:
+      - .:/app
+    environment:
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG

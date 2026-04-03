@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+*.pyc
+__pycache__
+*.egg-info
+.pytest_cache
+.mypy_cache
+*.log
+.DS_Store
+docker-compose.dev.yml
+README.md
