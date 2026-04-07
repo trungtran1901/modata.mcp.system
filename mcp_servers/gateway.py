@@ -39,7 +39,7 @@ from mcp_servers.admin_server       import mcp as admin_mcp
 from mcp_servers.hrm_server         import mcp as hrm_mcp
 from mcp_servers.hrm_request_server import mcp as hrm_req_mcp   # ← MỚI
 from mcp_servers.hrm_attendance_server  import mcp as hrm_att_mcp
-
+from mcp_servers.attendance_analytics_server  import mcp as att_ana_mcp
 gateway = FastMCP("MODATA Gateway")
 
 gateway.mount(data_mcp,      prefix="data")
@@ -51,7 +51,7 @@ gateway.mount(admin_mcp,     prefix="admin")
 gateway.mount(hrm_mcp,       prefix="hrm")         # hrm_*
 gateway.mount(hrm_req_mcp,   prefix="hrm_req")     # hrm_req_* ← MỚI
 gateway.mount(hrm_att_mcp,   prefix="hrm_att")     # hrm_att_* ← MỚI
-
+gateway.mount(att_ana_mcp,   prefix="att_ana") 
 if __name__ == "__main__":
     from app.core.config import settings
     logger.info("MCP Gateway starting → http://%s:%d/sse",

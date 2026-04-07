@@ -169,6 +169,70 @@ def _date_flt(from_date: str | None, to_date: str | None) -> dict:
 # ─────────────────────────────────────────────────────────────
 # TOOLS — description ngắn, nêu rõ field names MongoDB
 # ─────────────────────────────────────────────────────────────
+@mcp.tool()
+def list_requests_by_month(
+    session_id:   str,
+    username:     str,
+    year:         int,
+    month:        int,
+    loai_don:     Optional[str] = None,
+    trang_thai:   Optional[str] = None,
+    don_vi_code:  Optional[str] = None,
+    limit:        int           = 50,
+    company_code: str           = "HITC",
+) -> str:
+    """
+    Danh sách đơn từ theo tháng/năm.
+    Nếu có quyền view danh sách (HR hoặc manager) → xem toàn bộ, không filter theo username.
+    NV thường (chỉ có view cá nhân) → chỉ xem của mình.
+    """
+    p = _perm(session_id)
+    if not p["ok"]:
+        return json.dumps({"error": p["error"]}, ensure_ascii=False)
+
+    try:
+        dt_from = datetime(year, month, 1) - timedelta(hours=7)
+        if month == 12:
+            dt_to = datetime(year + 1, 1, 1) - timedelta(seconds=1) - timedelta(hours=7)
+        else:
+            dt_to = datetime(year, month + 1, 1) - timedelta(seconds=1) - timedelta(hours=7)
+    except ValueError as e:
+        return json.dumps({"error": f"Tháng/năm không hợp lệ: {e}"}, ensure_ascii=False)
+
+    db  = get_db()
+    flt: dict = {
+        "is_deleted":   {"$ne": True},
+        "company_code": company_code,
+        "ngay_nop_don": {"$gte": dt_from, "$lte": dt_to},
+    }
+
+    # Chỉ filter theo username nếu KHÔNG có quyền xem danh sách toàn công ty
+    if not p["is_hr"]:
+        ma_set = set(get_session_context(session_id).get_ma_chuc_nang_list(INSTANCE_NAME))
+        has_list_view = bool(ma_set & (HR_VIEW_NAMES | NV_VIEW_NAMES))
+        if not has_list_view or not bool(ma_set & HR_VIEW_NAMES):
+            flt["nguoi_nop_don.value"] = username
+
+    if don_vi_code:
+        flt["don_vi_cong_tac.value"] = don_vi_code
+
+    ll = _norm(loai_don)
+    if ll:
+        flt["loai_don"] = ll[0] if len(ll) == 1 else {"$in": ll}
+    if trang_thai:
+        flt["trang_thai_phe_duyet.value"] = trang_thai
+
+    limit = max(1, min(limit, 100))
+    docs  = list(db[COLLECTION].find(flt).sort("ngay_nop_don", -1).limit(limit))
+    total = db[COLLECTION].count_documents(flt)
+
+    return json.dumps({
+        "period":   f"Tháng {month}/{year}",
+        "is_hr":    p["is_hr"],
+        "total":    total,
+        "count":    len(docs),
+        "requests": [_flatten(d) for d in docs],
+    }, ensure_ascii=False, default=str)
 
 @mcp.tool()
 def get_my_requests(
@@ -242,10 +306,10 @@ def list_requests(
     db  = get_db()
     flt: dict = {"is_deleted": {"$ne": True}, "company_code": company_code}
 
-    if not p["is_hr"]:
-        flt["nguoi_nop_don.value"] = username
-    elif don_vi_code:
-        flt["don_vi_cong_tac.value"] = don_vi_code
+    # if not p["is_hr"]:
+    #     flt["nguoi_nop_don.value"] = username
+    # elif don_vi_code:
+    #     flt["don_vi_cong_tac.value"] = don_vi_code
 
     ll = _norm(loai_don)
     if ll:
