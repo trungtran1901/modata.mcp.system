@@ -615,6 +615,7 @@ def export_attendance_excel(
     output_path:       str = "",
     extra_columns:     str = "",  # JSON string: [{"key": "field_name", "label": "Tên cột"}]
     custom_formula_notes: str = "", # Ghi chú công thức tùy chỉnh từ user/LLM
+    data_overrides:    str = "",
 ) -> str:
     """
     Xuất file Excel bảng chấm công tổng hợp với 2 sheets:
@@ -639,6 +640,33 @@ def export_attendance_excel(
         return json.dumps(raw, ensure_ascii=False)
 
     employees   = raw["employees"]
+
+    if data_overrides:
+        try:
+            overrides = json.loads(data_overrides) if data_overrides else {}
+            # new_cols = json.loads(extra_columns) if extra_columns else {}
+
+            for emp in employees:
+                # Lấy trực tiếp reference để sửa là sửa vào gốc
+                if "summary" not in emp:
+                    emp["summary"] = {}
+                summary = emp["summary"]
+                mnv = emp.get("ma_nv", "")
+                # Bước B: Ghi đè dữ liệu từ LLM
+                emp_override = overrides.get(mnv)
+                if emp_override and isinstance(emp_override, dict):
+                    for field, val in emp_override.items():
+                        # Ép kiểu dữ liệu linh hoạt
+                        try:
+                            if isinstance(val, str) and val.replace('.','',1).isdigit():
+                                summary[field] = float(val)
+                            else:
+                                summary[field] = val
+                        except:
+                            summary[field] = val
+        except Exception as e:
+            logger.error(f"Dynamic override error: {e}")
+            
     period_info = raw["period_info"]
     ky_str      = period_info["ky_cham_cong"]
     period_start = date.fromisoformat(period_info["period_start"])
@@ -1061,7 +1089,8 @@ def export_attendance_excel(
     # ─────────────────────────────────────────────────────────
     if not output_path:
         safe = re.sub(r"[^\w]", "_", filter_value or "all")
-        output_path = f"/tmp/bang_cham_cong_{year_month}_{safe}.xlsx"
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = f"/tmp/bang_cham_cong_{year_month}_{now_str}_{safe}.xlsx"
 
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
     wb.save(output_path)
@@ -1088,6 +1117,7 @@ def compute_and_export(
     output_path:  str = "",
     extra_columns: str = "",
     custom_formula_notes: str = "",
+    data_overrides: str = "",
 ) -> str:
     """
     All-in-one: tính toán bảng chấm công và xuất Excel ngay.
@@ -1104,6 +1134,7 @@ def compute_and_export(
         output_path=output_path,
         extra_columns=extra_columns,
         custom_formula_notes=custom_formula_notes,
+        data_overrides=data_overrides,
     )
 
 
@@ -1120,6 +1151,7 @@ def send_attendance_report(
     company_code:     str = "HITC",
     extra_columns:    str = "",
     custom_formula_notes: str = "",
+    data_overrides:   str = "",
 ) -> str:
     """
     Xuất bảng chấm công Excel và gửi email đính kèm.
@@ -1139,6 +1171,7 @@ def send_attendance_report(
         company_code=company_code,
         extra_columns=extra_columns,
         custom_formula_notes=custom_formula_notes,
+        data_overrides=data_overrides,
     ))
     if export_res.get("status") != "success":
         return json.dumps(export_res, ensure_ascii=False)
