@@ -519,8 +519,60 @@ def _calc_one_employee(
         },
         "daily_detail": daily_detail,
     }
-
-
+def _recalculate_dependent_formulas(summary: dict, overrides_keys: set[str]) -> None:
+    """
+    Tính lại tất cả công thức phụ thuộc khi agent gửi data_overrides.
+    
+    Logic:
+      - Nếu agent sửa dm_gt_4h/dm_1h_4h/phut_muon_lt_1h
+        → tính lại tru_sm (trừ sớm về muộn)
+      
+      - Nếu agent sửa nghi_phep/nghi_le/wfh/cong_tac/nghi_khong_luong
+        → tính lại tong_cong_huong_luong
+      
+      - Nếu có thay đổi trong các fields trên hoặc tru_sm
+        → tính lại cong_tinh_luong
+    
+    Args:
+        summary: dict summary của 1 nhân viên (direct reference, sửa là sửa gốc)
+        overrides_keys: set các field mà agent gửi để sửa
+    """
+    
+    # Nhóm fields phụ thuộc
+    LATE_FIELDS = {'dm_gt_4h', 'dm_1h_4h', 'phut_muon_lt_1h'}
+    LEAVE_FIELDS = {'nghi_phep', 'nghi_le', 'wfh', 'cong_tac', 'nghi_khong_luong', 'so_cong_chuan'}
+    
+    # Step 1: Tính lại tru_sm nếu late fields bị sửa
+    if LATE_FIELDS & overrides_keys and 'tru_sm' not in overrides_keys:
+        dm_gt_240 = int(summary.get('dm_gt_4h', 0))
+        dm_60_240 = int(summary.get('dm_1h_4h', 0))
+        phut_lt60 = float(summary.get('phut_muon_lt_1h', 0))
+        
+        new_tru_sm = (
+            dm_gt_240 * 1.0 +
+            dm_60_240 * 0.5 +
+            round(phut_lt60 / 480, 4)
+        )
+        summary['tru_sm'] = round(new_tru_sm, 4)
+    
+    # Step 2: Tính lại tong_cong_huong_luong nếu leave fields bị sửa
+    if LEAVE_FIELDS & overrides_keys:
+        so_cong_chuan = float(summary.get('so_cong_chuan', 26))
+        nghi_kl = float(summary.get('nghi_khong_luong', 0))
+        nghi_phep = float(summary.get('nghi_phep', 0))
+        nghi_le = float(summary.get('nghi_le', 0))
+        wfh = float(summary.get('wfh', 0))
+        cong_tac = float(summary.get('cong_tac', 0))
+        
+        # Công hưởng lương = 26 - Nghỉ KL + (các loại nghỉ được hưởng lương)
+        new_cong_huong = so_cong_chuan - nghi_kl + nghi_phep + nghi_le + wfh + cong_tac
+        summary['tong_cong_huong_luong'] = new_cong_huong
+    
+    # Step 3: Tính lại cong_tinh_luong (LUÔN, vì có sự thay đổi ở trên)
+    cong_huong = float(summary.get('tong_cong_huong_luong', 26))
+    tru_sm = float(summary.get('tru_sm', 0))
+    new_cong_tinh_luong = cong_huong - tru_sm
+    summary['cong_tinh_luong'] = round(new_cong_tinh_luong, 4)
 # ─────────────────────────────────────────────────────────────
 # TOOLS
 # ─────────────────────────────────────────────────────────────
@@ -644,19 +696,17 @@ def export_attendance_excel(
     if data_overrides:
         try:
             overrides = json.loads(data_overrides) if data_overrides else {}
-            # new_cols = json.loads(extra_columns) if extra_columns else {}
-
+ 
             for emp in employees:
-                # Lấy trực tiếp reference để sửa là sửa vào gốc
                 if "summary" not in emp:
                     emp["summary"] = {}
                 summary = emp["summary"]
                 mnv = emp.get("ma_nv", "")
-                # Bước B: Ghi đè dữ liệu từ LLM
+                
                 emp_override = overrides.get(mnv)
                 if emp_override and isinstance(emp_override, dict):
+                    # 1️⃣ GHI ĐÈ TRỰC TIẾP TẤT CẢ FIELDS MÀ AGENT GỬI
                     for field, val in emp_override.items():
-                        # Ép kiểu dữ liệu linh hoạt
                         try:
                             if isinstance(val, str) and val.replace('.','',1).isdigit():
                                 summary[field] = float(val)
@@ -664,8 +714,17 @@ def export_attendance_excel(
                                 summary[field] = val
                         except:
                             summary[field] = val
+                    
+                    # 2️⃣ TÍNH LẠI CÁC CÔNG THỨC PHỤ THUỘC TỰ ĐỘNG
+                    _recalculate_dependent_formulas(summary, set(emp_override.keys()))
+                    
+                    logger.info(
+                        "Applied overrides for %s: %s → cong_tinh_luong=%.4f",
+                        mnv, list(emp_override.keys()), summary.get('cong_tinh_luong', 0)
+                    )
+                    
         except Exception as e:
-            logger.error(f"Dynamic override error: {e}")
+            logger.error(f"Dynamic override error: {e}", exc_info=True)
             
     period_info = raw["period_info"]
     ky_str      = period_info["ky_cham_cong"]
@@ -675,12 +734,17 @@ def export_attendance_excel(
     off_wdays    = set(period_info["off_weekdays"])  # 0-6
 
     # Parse extra columns
-    extra_cols = []
+    extra_cols = {}
     if extra_columns:
         try:
-            extra_cols = json.loads(extra_columns)
-        except Exception:
-            pass
+            parsed_extra = json.loads(extra_columns)
+            if isinstance(parsed_extra, list):
+                # Nếu LLM gửi List, tự động convert sang Dict
+                extra_cols = {col_name: "" for col_name in parsed_extra}
+            elif isinstance(parsed_extra, dict):
+                extra_cols = parsed_extra
+        except Exception as e:
+            logger.error(f"Lỗi parse extra_columns: {e}")
 
     try:
         from openpyxl import Workbook
@@ -771,7 +835,7 @@ def export_attendance_excel(
         ("Trừ SM",           8),
         ("Công tính lương",  13),
     ]
-    all_headers = fixed_headers + [(c["label"], 12) for c in extra_cols]
+    all_headers = fixed_headers + [(col_name, 12) for col_name in extra_cols.keys()]
 
     for ci, (lbl, wid) in enumerate(all_headers, 1):
         cell = ws1.cell(row=hdr_row, column=ci, value=lbl)
@@ -824,9 +888,9 @@ def export_attendance_excel(
                 values.append(s.get(field, ""))
 
         # Extra columns
-        for ec in extra_cols:
-            values.append(s.get(ec["key"], ""))
-
+        for col_name in extra_cols.keys():
+            # Lấy giá trị từ summary, nếu không có thì lấy giá trị mặc định LLM đưa ra
+            values.append(s.get(col_name, extra_cols[col_name]))
         for ci, val in enumerate(values, 1):
             cell = ws1.cell(row=r, column=ci, value=val)
             cell.font   = _font()
