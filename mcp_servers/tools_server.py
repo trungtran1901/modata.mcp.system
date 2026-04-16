@@ -152,26 +152,101 @@ def lookup_danhmuc(
 
 @mcp.tool()
 def get_org_tree(
-    path:         str = "/HTC/",
-    company_code: str = "HITC",
-    depth:        int = 2,
+    path:               str = "/HTC/",
+    company_code:       str = "HITC",
+    ten_don_vi_to_chuc: str = "",
+    depth:              int = 2,
 ) -> str:
-    """Cây tổ chức theo path. Vd: /HTC/ hoặc /HTC/PHÒNG_KT/"""
-    db   = get_db()
-    docs = list(db["instance_data_danh_muc_don_vi_to_chuc"].find(
-        {
-            "is_deleted":   {"$ne": True},
-            "company_code": company_code,
-            "path":         {"$regex": f"^{path}"},
-        },
-        {"code": 1, "ten_don_vi_to_chuc": 1, "path": 1},
-    ).sort("path", 1).limit(200))
+    """
+    Cây tổ chức theo path và/hoặc tên đơn vị.
+    
+    Tham số:
+    - path: prefix path để lọc (VD: "/HTC/" hoặc "/HTC/PHONG_KT/"). Mặc định "/HTC/"
+    - company_code: mã công ty (VD: "HITC")
+    - ten_don_vi_to_chuc: tên đơn vị cần tìm kiếm (VD: "Phòng phát triển sản phẩm",
+      "Khối kỹ thuật"). Nếu để trống thì trả về toàn bộ cây theo path.
+    - depth: độ sâu tối đa tính từ path gốc (mặc định 2)
+    
+    Trả về danh sách đơn vị khớp với _id, code, tên và path.
+    """
+    import re
 
+    db = get_db()
+
+    # ── Build query ───────────────────────────────────────────────────────────
+    query: dict = {
+        "is_deleted":   {"$ne": True},
+        "kich_hoat":   True,
+        "company_code": company_code,
+    }
+
+    # Nếu có tên tìm kiếm → dùng regex case-insensitive, bỏ dấu-safe
+    # MongoDB không hỗ trợ collation tiếng Việt nên dùng regex unicode
+    if ten_don_vi_to_chuc.strip():
+        # Tách từ khóa thành các token, mỗi token là một điều kiện AND
+        tokens = [t.strip() for t in ten_don_vi_to_chuc.split() if t.strip()]
+        if tokens:
+            query["$and"] = [
+                {"ten_don_vi_to_chuc": {"$regex": token, "$options": "i"}}
+                for token in tokens
+            ]
+        # Khi tìm theo tên → không giới hạn path (để tìm được toàn công ty)
+        # Nhưng vẫn filter company_code
+    else:
+        # Không có tên → filter theo path prefix như cũ
+        query["path"] = {"$regex": f"^{re.escape(path)}"}
+
+    # ── Query MongoDB ─────────────────────────────────────────────────────────
+    docs = list(
+        db["instance_data_danh_muc_don_vi_to_chuc"]
+        .find(query, {"code": 1, "ten_don_vi_to_chuc": 1, "path": 1})
+        .sort("path", 1)
+        .limit(50)  # giới hạn nhỏ hơn khi search tên để tránh nhiễu
+    )
+
+    # ── Filter depth (chỉ áp dụng khi KHÔNG search theo tên) ─────────────────
+    if not ten_don_vi_to_chuc.strip():
+        docs = [
+            d for d in docs
+            if d.get("path", "").count("/") - path.count("/") <= depth
+        ]
+
+    # ── Format kết quả ────────────────────────────────────────────────────────
     result = [
-        {"code": d.get("code"), "display": d.get("ten_don_vi_to_chuc"), "path": d.get("path")}
+        {
+            "_id":                str(d.get("_id")),
+            "code":               d.get("code"),
+            "ten_don_vi_to_chuc": d.get("ten_don_vi_to_chuc"),
+            "path":               d.get("path"),
+        }
         for d in docs
-        if d.get("path", "").count("/") - path.count("/") <= depth
     ]
+
+    # Nếu không tìm thấy gì khi search tên → fallback về path search
+    if not result and ten_don_vi_to_chuc.strip():
+        fallback_query = {
+            "is_deleted":   {"$ne": True},
+            "kich_hoat":   True,
+            "company_code": company_code,
+            "path":         {"$regex": f"^{re.escape(path)}"},
+        }
+        fallback_docs = list(
+            db["instance_data_danh_muc_don_vi_to_chuc"]
+            .find(fallback_query, {"code": 1, "ten_don_vi_to_chuc": 1, "path": 1})
+            .sort("path", 1)
+            .limit(200)
+        )
+        result = [
+            {
+                "_id":                str(d.get("_id")),
+                "code":               d.get("code"),
+                "ten_don_vi_to_chuc": d.get("ten_don_vi_to_chuc"),
+                "path":               d.get("path"),
+            }
+            for d in fallback_docs
+            if d.get("path", "").count("/") - path.count("/") <= depth
+        ]
+
     return json.dumps(result, ensure_ascii=False)
 
 

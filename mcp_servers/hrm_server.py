@@ -103,68 +103,103 @@ def _isodate_to_vn(dt: Any) -> str | None:
 def _flatten_nhan_vien(doc: dict) -> dict:
     """
     Flatten document nhân viên → {display_name: human_value}.
-    Chỉ giữ fields nghiệp vụ quan trọng, loại bỏ metadata kỹ thuật.
+    Dựa trên cấu trúc dữ liệu thực tế từ MongoDB.
     """
     result: dict = {}
 
-    # ── Thông tin cơ bản ─────────────────────────────────────
-    ten = doc.get("ho_va_ten_co_dau") or doc.get("ho_va_ten")
-    if ten:
-        result["Họ và tên"] = ten
-    if doc.get("ten_dang_nhap"):
-        result["Tên đăng nhập"] = doc["ten_dang_nhap"]
-    if doc.get("email"):
-        result["Email"] = doc["email"]
-    if doc.get("so_dien_thoai"):
-        result["Số điện thoại"] = doc["so_dien_thoai"]
+    # ── Định danh ────────────────────────────────────────────────────────────
+    result["_id"]           = str(doc.get("_id", ""))
+    result["Mã nhân viên"]  = doc.get("ma_nhan_vien") or ""
+    result["Mã chấm công"]  = doc.get("ma_cham_cong") or ""
+    result["Tên đăng nhập"] = doc.get("ten_dang_nhap") or ""
 
-    gioi_tinh = _extract_value(doc.get("gioi_tinh"))
-    if gioi_tinh:
-        result["Giới tính"] = gioi_tinh
+    # ── Họ tên ───────────────────────────────────────────────────────────────
+    result["Họ và tên"]     = doc.get("ho_va_ten_co_dau") or doc.get("ho_va_ten") or ""
+    result["ten_email"]     = doc.get("ten_email") or ""  # dùng để search/display
 
-    if doc.get("ngay_sinh"):
-        result["Ngày sinh"] = _isodate_to_vn(doc["ngay_sinh"])
+    # ── Liên hệ ──────────────────────────────────────────────────────────────
+    result["Email"]              = doc.get("email") or ""
+    result["Email cá nhân"]      = doc.get("email_ca_nhan") or ""
+    result["Số điện thoại"]      = doc.get("sdt_di_dong") or doc.get("so_dien_thoai") or ""
+    result["Số điện thoại CQ"]   = doc.get("sdt_co_quan") or ""
 
-    so_cccd = doc.get("so_can_cuoc") or doc.get("so_cmnd")
-    if so_cccd:
-        result["CCCD/CMND"] = so_cccd
+    # ── Cá nhân ──────────────────────────────────────────────────────────────
+    result["Giới tính"]          = _extract_value(doc.get("gioi_tinh")) or ""
+    result["Ngày sinh"]          = _isodate_to_vn(doc.get("ngay_sinh")) if doc.get("ngay_sinh") else ""
+    result["CCCD/CMND"]          = doc.get("cmt_cccd") or doc.get("so_cmtnd_cccd") or doc.get("so_cmnd") or ""
+    result["Ngày cấp CCCD"]      = _isodate_to_vn(doc.get("ngay_cap_cccd")) if doc.get("ngay_cap_cccd") else ""
+    result["Nơi cấp CCCD"]       = doc.get("noi_cap_cmt_cccd") or ""
+    result["Mã số thuế"]         = doc.get("ma_so_thue") or ""
+    result["Địa chỉ"]            = doc.get("dia_chi_cho_o_hien_nay") or doc.get("dia_chi") or ""
+    result["Dân tộc"]            = _extract_value(doc.get("dan_toc")) or ""
+    result["Tôn giáo"]           = _extract_value(doc.get("ton_giao")) or ""
+    result["Quốc tịch"]          = _extract_value(doc.get("quoc_tich")) or ""
+    result["Tình trạng hôn nhân"] = _extract_value(doc.get("tinh_trang_hon_nhan")) or ""
 
-    # ── Công việc ─────────────────────────────────────────────
-    dv = _extract_value(doc.get("don_vi_cong_tac"))
-    if dv:
-        result["Đơn vị công tác"] = dv
+    # ── Học vấn ──────────────────────────────────────────────────────────────
+    result["Trình độ đào tạo"]   = _extract_value(doc.get("trinh_do_dao_tao")) or ""
+    result["Nơi đào tạo"]        = _extract_value(doc.get("noi_dao_tao")) or ""
+    result["Chuyên ngành"]       = _extract_value(doc.get("chuyen_nganh")) or ""
+    result["Xếp loại tốt nghiệp"] = _extract_value(doc.get("xep_loai_tot_nghiep")) or ""
 
-    pb = _extract_value(doc.get("phong_ban_phu_trach"))
-    if pb:
-        result["Phòng ban"] = pb
+    # ── Tổ chức / Đơn vị ─────────────────────────────────────────────────────
+    result["Khối chức năng"]     = doc.get("khoi_chuc_nang") or ""
+    result["Khu vực"]            = _extract_value(doc.get("khu_vuc")) or ""
+    result["Địa điểm làm việc"]  = _extract_value(doc.get("dia_diem_lam_viec")) or ""
+    result["Company code"]       = doc.get("company_code") or ""
 
-    cv = _extract_value(doc.get("chuc_vu"))
-    if cv:
-        result["Chức vụ"] = cv
+    # phong_cap_1 / phong_cap_2 / phong_cap_3 — cấu trúc {"label":..., "value":...}
+    result["Khối (cấp 1)"]       = _extract_value(doc.get("phong_cap_1")) or ""
+    result["Phòng ban (cấp 2)"]  = _extract_value(doc.get("phong_cap_2")) or ""
+    result["Phòng ban (cấp 3)"]  = _extract_value(doc.get("phong_cap_3")) or ""
 
-    vt = _extract_value(doc.get("vi_tri_cong_viec"))
-    if vt:
-        result["Vị trí công việc"] = vt
+    # path dạng "/HTC/KT/"
+    result["Path cấp 1"]         = doc.get("path_cap_1") or ""
+    result["Path phòng ban"]     = doc.get("path_phong_ban") or ""
+    result["Path đơn vị CT"]     = doc.get("path_don_vi_cong_tac") or ""
 
-    if doc.get("ngay_vao_lam"):
-        result["Ngày vào làm"] = _isodate_to_vn(doc["ngay_vao_lam"])
+    # don_vi_cong_tac / phong_ban_phu_trach — cấu trúc objectValue với _id, label, value
+    dv = doc.get("don_vi_cong_tac") or {}
+    result["Đơn vị công tác"]         = dv.get("label") or ""
+    result["Đơn vị công tác (code)"]  = dv.get("value") or ""
+    result["Đơn vị công tác (_id)"]   = dv.get("_id") or ""
 
-    trang_thai = _extract_value(doc.get("trang_thai_lao_dong"))
-    if trang_thai:
-        result["Trạng thái lao động"] = trang_thai
+    pb = doc.get("phong_ban_phu_trach") or {}
+    result["Phòng ban phụ trách"]         = pb.get("label") or ""
+    result["Phòng ban phụ trách (code)"]  = pb.get("value") or ""
+    result["Phòng ban phụ trách (_id)"]   = pb.get("_id") or ""
 
-    loai_hd = _extract_value(doc.get("loai_hop_dong"))
-    if loai_hd:
-        result["Loại hợp đồng"] = loai_hd
+    # ds_don_vi_cong_tac — list các đơn vị (lấy label join)
+    ds_dv = doc.get("ds_don_vi_cong_tac") or []
+    result["Danh sách đơn vị CT"] = ", ".join(
+        item.get("label", "") for item in ds_dv if item.get("label")
+    )
 
-    # ── Lương (chỉ hiển thị nếu field tồn tại trong doc) ─────
+    # ── Công việc ────────────────────────────────────────────────────────────
+    result["Chức vụ"]            = _extract_value(doc.get("chuc_vu")) or ""
+    result["Vị trí công việc"]   = _extract_value(doc.get("vi_tri_cong_viec")) or ""
+    result["Tính chất lao động"] = _extract_value(doc.get("tinh_chat_lao_dong")) or ""
+    result["Trạng thái lao động"] = _extract_value(doc.get("trang_thai_lao_dong")) or ""
+    result["Loại hợp đồng"]      = _extract_value(doc.get("loai_hop_dong")) or ""
+    result["Trạng thái tài khoản"] = _extract_value(doc.get("trang_thai_tai_khoan")) or ""
+
+    result["Ngày thử việc"]      = _isodate_to_vn(doc.get("ngay_thu_viec")) if doc.get("ngay_thu_viec") else ""
+    result["Ngày chính thức"]    = _isodate_to_vn(doc.get("ngay_chinh_thuc")) if doc.get("ngay_chinh_thuc") else ""
+    result["Ngày vào làm"]       = _isodate_to_vn(doc.get("ngay_vao_lam")) if doc.get("ngay_vao_lam") else ""
+
+    # ── Vai trò ──────────────────────────────────────────────────────────────
+    vai_tro_list = doc.get("vai_tro") or []
+    result["Vai trò"] = ", ".join(
+        item.get("label", "") for item in vai_tro_list if item.get("label")
+    )
+
+    # ── Lương ────────────────────────────────────────────────────────────────
     if doc.get("luong_co_ban") is not None:
         result["Lương cơ bản"] = doc["luong_co_ban"]
     if doc.get("he_so_luong") is not None:
         result["Hệ số lương"] = doc["he_so_luong"]
 
     return result
-
 
 def _flatten_ngay_nghi_le(doc: dict) -> dict:
     """Flatten document ngày nghỉ lễ."""
@@ -318,7 +353,7 @@ def search_employees(
 
     Args:
         session_id:   Session ID
-        keyword:      Từ khóa tìm kiếm (tên, username, email, SĐT)
+        keyword:      Từ khóa tìm kiếm (tên, username, email, SĐT, mã nhân viên)
         limit:        Số kết quả tối đa (mặc định 10, tối đa 50)
         company_code: Mã công ty
     """
@@ -335,6 +370,7 @@ def search_employees(
             {"ho_va_ten":        {"$regex": keyword, "$options": "i"}},
             {"ho_va_ten_co_dau": {"$regex": keyword, "$options": "i"}},
             {"ten_dang_nhap":    {"$regex": keyword, "$options": "i"}},
+            {"ma_nhan_vien":    {"$regex": keyword, "$options": "i"}},
             {"email":            {"$regex": keyword, "$options": "i"}},
             {"so_dien_thoai":    {"$regex": keyword, "$options": "i"}},
         ],
@@ -394,10 +430,10 @@ def list_employees(
 
     if don_vi_code:
         flt["$or"] = [
-            {"don_vi_cong_tac.value":       don_vi_code},
-            {"don_vi_cong_tac.option.code": don_vi_code},
-            {"phong_ban_phu_trach.value":   don_vi_code},
-            {"path_don_vi_cong_tac": {"$regex": don_vi_code, "$options": "i"}},
+            {"phong_cap_1.value":       don_vi_code},
+            {"phong_cap_2.value": don_vi_code},
+            {"phong_cap_3.value":   don_vi_code},
+            {"path_phong_ban": {"$regex": don_vi_code, "$options": "i"}},
         ]
 
     limit = max(1, min(limit, 100))
